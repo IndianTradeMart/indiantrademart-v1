@@ -1,0 +1,241 @@
+═══════════════════════════════════════════════════════════════════════════════
+               WINDOWS HOSTS FILE SETUP FOR SUBDOMAIN TESTING
+═══════════════════════════════════════════════════════════════════════════════
+
+PURPOSE:
+  Map subdomain.localhost to 127.0.0.1 so you can test:
+  - vendor.localhost:3000
+  - buyer.localhost:3000
+  - dir.localhost:3000
+  - man.localhost:3000
+  etc. locally
+
+═══════════════════════════════════════════════════════════════════════════════
+                              STEP-BY-STEP
+═══════════════════════════════════════════════════════════════════════════════
+
+STEP 1: Open Hosts File
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Method A: Using Notepad (Simple)
+  1. Press Windows + R
+  2. Type: notepad C:\Windows\System32\drivers\etc\hosts
+  3. Click OK
+  4. Windows may ask for admin permission - click "Yes"
+
+Method B: Using Command Prompt (Admin)
+  1. Right-click Command Prompt
+  2. Select "Run as administrator"
+  3. Type: notepad C:\Windows\System32\drivers\etc\hosts
+  4. Press Enter
+
+
+STEP 2: Add Subdomain Entries
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Scroll to the BOTTOM of the file and add:
+
+────────────────────────────────────────────────────────────────────────────────
+# Indian Trade Mart - Local Subdomain Testing
+# Added: 2024-12-31
+
+127.0.0.1 localhost
+127.0.0.1 vendor.localhost
+127.0.0.1 buyer.localhost
+127.0.0.1 dir.localhost
+127.0.0.1 man.localhost
+127.0.0.1 admin.localhost
+127.0.0.1 emp.localhost
+127.0.0.1 career.localhost
+────────────────────────────────────────────────────────────────────────────────
+
+IMPORTANT:
+  ✓ Keep format: IP_ADDRESS  hostname
+  ✓ Use TABS or SPACES between IP and hostname
+  ✓ One entry per line
+  ✓ No extra spaces at the end
+
+
+STEP 3: Save File
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  1. Click File → Save
+  2. Or press Ctrl + S
+  3. You may need to confirm admin access
+  4. Close Notepad
+
+
+STEP 4: Flush DNS Cache
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Open Command Prompt as Administrator and run:
+
+  ipconfig /flushdns
+
+You should see:
+  "Windows IP configuration successfully flushed the DNS Resolver Cache."
+
+
+STEP 5: Test DNS Resolution
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Open Command Prompt and run:
+
+  ping vendor.localhost
+  ping buyer.localhost
+  ping dir.localhost
+
+You should see:
+  "Reply from 127.0.0.1: bytes=32 time=1ms TTL=64"
+
+If you see "Host unknown" or similar error:
+  1. Check hosts file again (spelling, format)
+  2. Run "ipconfig /flushdns" again
+  3. Restart your browser
+  4. Maybe restart Windows
+
+
+STEP 6: Start Development Servers
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Terminal 1:
+  npm run dev:server
+
+Terminal 2:
+  npm run dev
+
+Or with subdomain config:
+  npm run dev -- --config vite.config.subdomain.js
+
+
+STEP 7: Test Subdomain Access in Browser
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Try these URLs:
+
+Vendor Portal:
+  http://vendor.localhost:3000/dashboard
+  http://vendor.localhost:5173/dashboard
+
+Buyer Portal:
+  http://buyer.localhost:3000/dashboard
+  http://buyer.localhost:5173/dashboard
+
+Directory:
+  http://dir.localhost:3000/
+  http://dir.localhost:5173/
+
+Main Domain:
+  http://localhost:3000/
+  http://localhost:5173/
+
+Management:
+  http://man.localhost:3000/dashboard
+
+If pages don't load:
+  1. Check browser console (F12)
+  2. Check server logs (Terminal 1 & 2)
+  3. Enable DEBUG_SUBDOMAIN=true in .env.local
+
+
+═══════════════════════════════════════════════════════════════════════════════
+                            VERIFY HOSTS FILE
+═══════════════════════════════════════════════════════════════════════════════
+
+Check current hosts file contents:
+
+  Command Prompt (as admin):
+  type C:\Windows\System32\drivers\etc\hosts
+
+PowerShell (as admin):
+  Get-Content C:\Windows\System32\drivers\etc\hosts
+
+Should show your entries at the bottom.
+
+
+═══════════════════════════════════════════════════════════════════════════════
+                         COMPLETE HOSTS FILE EXAMPLE
+═══════════════════════════════════════════════════════════════════════════════
+
+Here's what the end of your hosts file should look like:
+
+────────────────────────────────────────────────────────────────────────────────
+# Copyright (c) 1993-2009 Microsoft Corp.
+# This is a sample HOSTS file...
+# ... (rest of default content)
+
+# localhost name resolution is handled within DNS itself.
+#       127.0.0.1       localhost
+#       ::1             localhost
+
+# Indian Trade Mart - Local Subdomain Testing
+# Added: 2024-12-31
+
+127.0.0.1 localhost
+127.0.0.1 vendor.localhost
+127.0.0.1 buyer.localhost
+127.0.0.1 dir.localhost
+127.0.0.1 man.localhost
+127.0.0.1 admin.localhost
+127.0.0.1 emp.localhost
+127.0.0.1 career.localhost
+────────────────────────────────────────────────────────────────────────────────
+
+
+═══════════════════════════════════════════════════════════════════════════════
+                           COMMON ISSUES
+═══════════════════════════════════════════════════════════════════════════════
+
+Q: "ERR_INVALID_URL_CHAR" error
+A: Make sure you're using correct URL format: http://vendor.localhost:3000
+   NOT: http://vendor.localhost
+
+Q: "Cannot GET /dashboard"
+A: This means DNS resolution worked but the page doesn't exist
+   Check that your dev server is running
+
+Q: Browser shows old page
+A: Press Ctrl+Shift+Delete to clear cache
+   Or use Ctrl+F5 to hard refresh
+
+Q: Still seeing "Host unknown"
+A: Restart your browser
+   Or restart Windows if that doesn't work
+
+Q: CORS errors when calling API
+A: Make sure both servers are running:
+   - npm run dev:server (port 3001)
+   - npm run dev (port 5173 or 3000)
+
+Q: Ports already in use
+A: Change port in .env.local:
+   PORT=3001 → PORT=3002
+
+
+═══════════════════════════════════════════════════════════════════════════════
+                            TROUBLESHOOTING
+═══════════════════════════════════════════════════════════════════════════════
+
+1. Check if DNS is working:
+   ping vendor.localhost
+
+2. Check if servers are running:
+   - Backend: http://localhost:3001/health
+   - Frontend: http://localhost:5173/
+
+3. Check browser console (F12) for errors
+
+4. Enable debug logging:
+   set DEBUG_SUBDOMAIN=true
+   npm run dev:server
+
+5. Check Express server output for subdomain detection:
+   Look for: "[Subdomain] Host: vendor.localhost:3000 → Subdomain: vendor"
+
+
+═══════════════════════════════════════════════════════════════════════════════
+
+Created: 2024-12-31
+For: Indian Trade Mart Local Development
+
+═══════════════════════════════════════════════════════════════════════════════

@@ -1,0 +1,11 @@
+/api/*  /.netlify/functions/:splat  200
+
+/@vite/*  /@vite/:splat  200
+/@react-refresh  /@react-refresh  200
+/src/*  /src/:splat  200
+/node_modules/*  /node_modules/:splat  200
+/assets/*  /assets/:splat  200
+/visual-editor-config.js  /visual-editor-config.js  200
+
+/*  /index.html  200
+

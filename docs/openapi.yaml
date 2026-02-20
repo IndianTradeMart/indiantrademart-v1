@@ -1,0 +1,1170 @@
+openapi: 3.0.3
+info:
+  title: IndianTradeMart API
+  version: 1.0.0
+  description: Express API surface for the IndianTradeMart platform.
+servers:
+  - url: http://localhost:3001
+    description: Local dev server
+  - url: / 
+    description: Relative (proxy)
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        details:
+          type: string
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+    OTPRequest:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+    OTPVerify:
+      type: object
+      required: [email, otp_code]
+      properties:
+        email:
+          type: string
+          format: email
+        otp_code:
+          type: string
+    PasswordResetRequest:
+      type: object
+      required: [email, new_password]
+      properties:
+        email:
+          type: string
+          format: email
+        new_password:
+          type: string
+          minLength: 6
+    PasswordResetVerifyEmail:
+      type: object
+      required: [email, role]
+      properties:
+        email:
+          type: string
+          format: email
+        role:
+          type: string
+          enum: [BUYER, VENDOR]
+    QuotationSendRequest:
+      type: object
+      required: [buyer_email, vendor_id, quotation_title]
+      properties:
+        buyer_email:
+          type: string
+          format: email
+        vendor_id:
+          type: string
+        quotation_title:
+          type: string
+        quotation_amount:
+          type: number
+        quantity:
+          type: string
+        unit:
+          type: string
+        validity_days:
+          type: string
+        delivery_days:
+          type: string
+        terms_conditions:
+          type: string
+        vendor_name:
+          type: string
+        vendor_company:
+          type: string
+        vendor_phone:
+          type: string
+        vendor_email:
+          type: string
+        attachment_name:
+          type: string
+        attachment_base64:
+          type: string
+        attachment_mime:
+          type: string
+    SupportTicketCreate:
+      type: object
+      required: [subject, description]
+      properties:
+        subject:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+        priority:
+          type: string
+        status:
+          type: string
+        vendor_id:
+          type: string
+        buyer_id:
+          type: string
+        attachments:
+          type: array
+          items:
+            type: object
+    SupportMessageCreate:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+        sender_type:
+          type: string
+        sender_id:
+          type: string
+    KycReject:
+      type: object
+      properties:
+        remarks:
+          type: string
+    PaymentInitiateRequest:
+      type: object
+      required: [vendor_id, plan_id]
+      properties:
+        vendor_id:
+          type: string
+        plan_id:
+          type: string
+        coupon_code:
+          type: string
+    PaymentVerifyRequest:
+      type: object
+      required: [order_id, payment_id, signature, vendor_id, plan_id]
+      properties:
+        order_id:
+          type: string
+        payment_id:
+          type: string
+        signature:
+          type: string
+        vendor_id:
+          type: string
+        plan_id:
+          type: string
+        coupon_code:
+          type: string
+    ChatRequest:
+      type: object
+      required: [messages]
+      properties:
+        language:
+          type: string
+        model:
+          type: string
+        messages:
+          type: array
+          items:
+            type: object
+            required: [role, text]
+            properties:
+              role:
+                type: string
+              text:
+                type: string
+    SuperadminLogin:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      responses:
+        '200':
+          description: OK
+
+  /api/otp/request:
+    post:
+      summary: Request OTP
+      tags: [OTP]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OTPRequest'
+      responses:
+        '200':
+          description: OTP sent
+        '400':
+          description: Invalid input
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /api/otp/verify:
+    post:
+      summary: Verify OTP
+      tags: [OTP]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OTPVerify'
+      responses:
+        '200':
+          description: Verified
+        '401':
+          description: Invalid/expired OTP
+
+  /api/otp/resend:
+    post:
+      summary: Resend OTP
+      tags: [OTP]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OTPRequest'
+      responses:
+        '200':
+          description: OTP resent
+
+  /api/password-reset:
+    post:
+      summary: Reset password after OTP
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetRequest'
+      responses:
+        '200':
+          description: Password updated
+
+  /api/password-reset/verify-email:
+    post:
+      summary: Verify email for password reset
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordResetVerifyEmail'
+      responses:
+        '200':
+          description: Email verified
+
+  /api/quotation/send:
+    post:
+      summary: Send quotation
+      tags: [Quotation]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuotationSendRequest'
+      responses:
+        '200':
+          description: Quotation sent
+
+  /api/support/tickets:
+    get:
+      summary: List tickets (filters)
+      tags: [Support]
+      responses:
+        '200':
+          description: Tickets
+    post:
+      summary: Create ticket
+      tags: [Support]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SupportTicketCreate'
+      responses:
+        '201':
+          description: Created
+
+  /api/support/tickets/{id}:
+    get:
+      summary: Get ticket
+      tags: [Support]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Ticket
+    patch:
+      summary: Update ticket fields
+      tags: [Support]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Updated
+
+  /api/support/tickets/{id}/messages:
+    get:
+      summary: Get ticket messages
+      tags: [Support]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Messages
+    post:
+      summary: Post ticket message
+      tags: [Support]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SupportMessageCreate'
+      responses:
+        '200':
+          description: Created
+
+  /api/support/tickets/{id}/status:
+    put:
+      summary: Update ticket status
+      tags: [Support]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                status:
+                  type: string
+      responses:
+        '200':
+          description: Updated
+
+  /api/support/stats:
+    get:
+      summary: Ticket stats
+      tags: [Support]
+      responses:
+        '200':
+          description: Stats
+
+  /api/support/vendor/{vendorId}:
+    get:
+      summary: Vendor tickets
+      tags: [Support]
+      parameters:
+        - name: vendorId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Tickets
+
+  /api/support/buyer/{buyerId}:
+    get:
+      summary: Buyer tickets
+      tags: [Support]
+      parameters:
+        - name: buyerId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Tickets
+
+  /api/kyc/vendors:
+    get:
+      summary: List vendors by KYC status
+      tags: [KYC]
+      responses:
+        '200':
+          description: Vendors
+
+  /api/kyc/vendors/{vendorId}/documents:
+    get:
+      summary: Fetch vendor KYC documents
+      tags: [KYC]
+      parameters:
+        - name: vendorId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Documents
+
+  /api/kyc/vendors/{vendorId}/approve:
+    post:
+      summary: Approve vendor KYC
+      tags: [KYC]
+      parameters:
+        - name: vendorId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Approved
+
+  /api/kyc/vendors/{vendorId}/reject:
+    post:
+      summary: Reject vendor KYC
+      tags: [KYC]
+      parameters:
+        - name: vendorId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/KycReject'
+      responses:
+        '200':
+          description: Rejected
+
+  /api/admin/vendors:
+    get:
+      summary: Admin list vendors
+      tags: [Admin]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Vendors
+
+  /api/admin/vendors/{vendorId}/products:
+    get:
+      summary: Admin list vendor products
+      tags: [Admin]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: vendorId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Products
+
+  /api/admin/vendors/{vendorId}/terminate:
+    post:
+      summary: Suspend vendor
+      tags: [Admin]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: vendorId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Suspended
+
+  /api/admin/vendors/{vendorId}/activate:
+    post:
+      summary: Activate vendor
+      tags: [Admin]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: vendorId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Activated
+
+  /api/admin/buyers:
+    get:
+      summary: Admin list buyers
+      tags: [Admin]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Buyers
+
+  /api/admin/buyers/{buyerId}/terminate:
+    post:
+      summary: Suspend buyer
+      tags: [Admin]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: buyerId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Suspended
+
+  /api/admin/buyers/{buyerId}/activate:
+    post:
+      summary: Activate buyer
+      tags: [Admin]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: buyerId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Activated
+
+  /api/admin/products/{productId}:
+    put:
+      summary: Update product
+      tags: [Admin]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Updated
+    delete:
+      summary: Delete product
+      tags: [Admin]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: productId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Deleted
+
+  /api/admin/staff:
+    get:
+      summary: List staff
+      tags: [Admin]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Staff
+    post:
+      summary: Create staff
+      tags: [Admin]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [full_name, email, password, role]
+              properties:
+                full_name:
+                  type: string
+                email:
+                  type: string
+                password:
+                  type: string
+                role:
+                  type: string
+      responses:
+        '200':
+          description: Created
+
+  /api/admin/staff/{employeeId}:
+    delete:
+      summary: Delete staff
+      tags: [Admin]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: employeeId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Deleted
+
+  /api/admin/staff/{employeeId}/password:
+    put:
+      summary: Reset staff password
+      tags: [Admin]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: employeeId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                password:
+                  type: string
+      responses:
+        '200':
+          description: Updated
+
+  /api/admin/audit-logs:
+    get:
+      summary: List audit logs
+      tags: [Admin]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Logs
+
+  /api/admin/dashboard/recent-lead-purchases:
+    get:
+      summary: Recent lead purchases
+      tags: [Admin]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Orders
+
+  /api/admin/dashboard/data-entry-performance:
+    get:
+      summary: Data entry performance
+      tags: [Admin]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Performance
+
+  /api/finance/payments:
+    get:
+      summary: Finance payment list
+      tags: [Finance]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Payments
+
+  /api/finance/summary:
+    get:
+      summary: Finance summary
+      tags: [Finance]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Summary
+
+  /api/finance/coupons:
+    get:
+      summary: List coupons
+      tags: [Finance]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Coupons
+    post:
+      summary: Create coupon
+      tags: [Finance]
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, discount_type, value]
+              properties:
+                code:
+                  type: string
+                discount_type:
+                  type: string
+                value:
+                  type: number
+      responses:
+        '200':
+          description: Created
+
+  /api/finance/coupons/{code}/deactivate:
+    post:
+      summary: Deactivate coupon
+      tags: [Finance]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Deactivated
+
+  /api/finance/coupons/{id}:
+    delete:
+      summary: Delete coupon
+      tags: [Finance]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Deleted
+
+  /api/payment/initiate:
+    post:
+      summary: Initiate payment
+      tags: [Payment]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentInitiateRequest'
+      responses:
+        '200':
+          description: Order created
+
+  /api/payment/verify:
+    post:
+      summary: Verify payment
+      tags: [Payment]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PaymentVerifyRequest'
+      responses:
+        '200':
+          description: Subscription activated
+
+  /api/payment/history/{vendor_id}:
+    get:
+      summary: Vendor payment history
+      tags: [Payment]
+      parameters:
+        - name: vendor_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Payments
+
+  /api/payment/invoice/{payment_id}:
+    get:
+      summary: Fetch invoice
+      tags: [Payment]
+      parameters:
+        - name: payment_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: refresh
+          in: query
+          required: false
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Invoice
+
+  /api/payment/invoice/by-tx/{transaction_id}:
+    get:
+      summary: Fetch invoice by transaction id
+      tags: [Payment]
+      parameters:
+        - name: transaction_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: refresh
+          in: query
+          required: false
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Invoice
+
+  /api/payment/plans:
+    get:
+      summary: List subscription plans
+      tags: [Payment]
+      responses:
+        '200':
+          description: Plans
+
+  /api/dir/search:
+    get:
+      summary: Directory search (ranked)
+      tags: [Directory]
+      parameters:
+        - name: q
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: microSlug
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: stateId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: cityId
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: page
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: Products
+
+  /api/dir/products:
+    get:
+      summary: Directory products (alias)
+      tags: [Directory]
+      responses:
+        '200':
+          description: Products
+
+  /api/chat:
+    post:
+      summary: Chatbot
+      tags: [Chatbot]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatRequest'
+      responses:
+        '200':
+          description: Reply
+
+  /api/superadmin/login:
+    post:
+      summary: Superadmin login
+      tags: [Superadmin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SuperadminLogin'
+      responses:
+        '200':
+          description: Token
+
+  /api/superadmin/me:
+    get:
+      summary: Superadmin session
+      tags: [Superadmin]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Session
+
+  /api/superadmin/password:
+    put:
+      summary: Superadmin change password
+      tags: [Superadmin]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Updated
+
+  /api/superadmin/employees:
+    get:
+      summary: Superadmin list employees
+      tags: [Superadmin]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Employees
+    post:
+      summary: Superadmin create employee
+      tags: [Superadmin]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Created
+
+  /api/superadmin/employees/{employeeId}:
+    delete:
+      summary: Superadmin delete employee
+      tags: [Superadmin]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: employeeId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Deleted
+
+  /api/superadmin/employees/{employeeId}/password:
+    put:
+      summary: Superadmin reset employee password
+      tags: [Superadmin]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: employeeId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Updated
+
+  /api/superadmin/vendors:
+    get:
+      summary: Superadmin list vendors
+      tags: [Superadmin]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Vendors
+
+  /api/superadmin/vendors/{vendorId}:
+    delete:
+      summary: Superadmin delete vendor (cascade)
+      tags: [Superadmin]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: vendorId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Deleted
+
+  /api/superadmin/finance/summary:
+    get:
+      summary: Superadmin finance summary
+      tags: [Superadmin]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Summary
+
+  /api/superadmin/finance/payments:
+    get:
+      summary: Superadmin finance payments
+      tags: [Superadmin]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Payments
+
+  /api/superadmin/system-config:
+    get:
+      summary: Get system config
+      tags: [Superadmin]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Config
+    put:
+      summary: Update system config
+      tags: [Superadmin]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Updated
+
+  /api/superadmin/page-status:
+    get:
+      summary: List page status
+      tags: [Superadmin]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Pages
+    post:
+      summary: Create page status
+      tags: [Superadmin]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Created
+
+  /api/superadmin/page-status/{pageId}:
+    put:
+      summary: Update page status
+      tags: [Superadmin]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: pageId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Updated
+    delete:
+      summary: Delete page status
+      tags: [Superadmin]
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: pageId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Deleted
+
+  /api/superadmin/audit-logs:
+    get:
+      summary: Superadmin audit logs
+      tags: [Superadmin]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Logs
+
+  /api/employee/me:
+    get:
+      summary: Resolve employee profile from auth token
+      tags: [Employee]
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Employee
+
+  /api/migration/vendor-ids/migrate-single:
+    post:
+      summary: Migrate single vendor id
+      tags: [Migration]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [vendorId]
+              properties:
+                vendorId:
+                  type: string
+      responses:
+        '200':
+          description: Migrated
+
+  /api/migration/vendor-ids/migrate-all:
+    post:
+      summary: Migrate all vendor ids
+      tags: [Migration]
+      responses:
+        '200':
+          description: Migrated

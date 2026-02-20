@@ -1,0 +1,18 @@
+No storage option exists to persist the session, which may result in unexpected behavior when using auth.
+        If you want to set persistSession to true, please provide a storage option or you may set persistSession to false to disable this warning.
+No storage option exists to persist the session, which may result in unexpected behavior when using auth.
+        If you want to set persistSession to true, please provide a storage option or you may set persistSession to false to disable this warning.
+No storage option exists to persist the session, which may result in unexpected behavior when using auth.
+        If you want to set persistSession to true, please provide a storage option or you may set persistSession to false to disable this warning.
+≡ƒÜÇ Initializing subscription cron jobs...
+Γ£à Subscription cron jobs initialized
+   - Expiring subscriptions check: Daily at 2 AM UTC
+   - Expired subscriptions check: Daily at 3 AM UTC
+Γ£à OTP Server running on http://localhost:3001
+≡ƒôº Email: ultimatedev2025@gmail.com
+ΓÅ▒∩╕Å  OTP Expiry: 2 minutes
+≡ƒöó OTP Length: 6 digits
+Γ£à Approving KYC for vendor: 1845dc4a-8b7f-46d5-b089-b129624d7566
+Γ£à KYC approved for vendor 1845dc4a-8b7f-46d5-b089-b129624d7566, updated 0 documents
+Γ£à Approving KYC for vendor: 1845dc4a-8b7f-46d5-b089-b129624d7566
+Γ£à KYC approved for vendor 1845dc4a-8b7f-46d5-b089-b129624d7566, updated 0 documents

@@ -1,0 +1,13 @@
+User-agent: *
+Disallow:
+Allow: /
+
+Sitemap: https://indiantrademart.com/sitemap.xml
+Sitemap: https://indiantrademart.com/sitemap-products.xml
+Sitemap: https://indiantrademart.com/sitemap-vendors.xml
+Sitemap: https://indiantrademart.com/sitemap-categories.xml
+
+# NOTE:
+# - This file allows bots to crawl all pages, including individual product/service pages.
+# - Dynamic sitemaps are generated during build to ensure bot access to all content.
+# - Search engines will use these sitemaps to discover and index product/service pages properly.

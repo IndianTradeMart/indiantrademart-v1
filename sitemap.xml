@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <!-- Homepage -->
+  <url>
+    <loc>https://indiantrademart.com/</loc>
+    <lastmod>2026-01-12</lastmod>
+    <priority>1.0</priority>
+    <changefreq>weekly</changefreq>
+  </url>
+
+  <!-- Static Pages -->
+  <url>
+    <loc>https://indiantrademart.com/about-us</loc>
+    <lastmod>2026-01-12</lastmod>
+    <priority>0.7</priority>
+    <changefreq>monthly</changefreq>
+  </url>
+
+  <url>
+    <loc>https://indiantrademart.com/become-a-vendor</loc>
+    <lastmod>2026-01-12</lastmod>
+    <priority>0.8</priority>
+    <changefreq>monthly</changefreq>
+  </url>
+
+  <url>
+    <loc>https://indiantrademart.com/pricing</loc>
+    <lastmod>2026-01-12</lastmod>
+    <priority>0.7</priority>
+    <changefreq>monthly</changefreq>
+  </url>
+
+  <url>
+    <loc>https://indiantrademart.com/directory</loc>
+    <lastmod>2026-01-12</lastmod>
+    <priority>0.9</priority>
+    <changefreq>weekly</changefreq>
+  </url>
+
+  <!-- Aliases -->
+  <url>
+    <loc>https://indiantrademart.com/search-suppliers</loc>
+    <lastmod>2026-01-29</lastmod>
+    <priority>0.8</priority>
+    <changefreq>weekly</changefreq>
+  </url>
+  <url>
+    <loc>https://indiantrademart.com/city/noida</loc>
+    <lastmod>2026-01-29</lastmod>
+    <priority>0.7</priority>
+    <changefreq>weekly</changefreq>
+  </url>
+
+  <url>
+    <loc>https://indiantrademart.com/directory/vendor</loc>
+    <lastmod>2026-01-12</lastmod>
+    <priority>0.8</priority>
+    <changefreq>weekly</changefreq>
+  </url>
+
+  <url>
+    <loc>https://indiantrademart.com/contact</loc>
+    <lastmod>2026-01-12</lastmod>
+    <priority>0.6</priority>
+    <changefreq>yearly</changefreq>
+  </url>
+
+  <!-- Dynamic content sitemaps are generated separately -->
+  <!-- See: sitemap-products.xml, sitemap-vendors.xml, sitemap-categories.xml -->
+
+</urlset>
