@@ -16,6 +16,73 @@ const isMissingColumnError = (error) => {
   return error.code === '42703' || /column .* does not exist/i.test(error.message || '');
 };
 
+const toImageUrlList = (value) => {
+  const urls = [];
+  const append = (entry) => {
+    if (entry == null) return;
+
+    if (typeof entry === 'string') {
+      const clean = entry.trim();
+      if (clean) urls.push(clean);
+      return;
+    }
+
+    if (Array.isArray(entry)) {
+      entry.forEach(append);
+      return;
+    }
+
+    if (typeof entry === 'object') {
+      const candidate = String(entry.url || entry.image_url || entry.src || '').trim();
+      if (candidate) urls.push(candidate);
+    }
+  };
+
+  if (typeof value === 'string') {
+    const raw = value.trim();
+    if (raw.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(raw);
+        append(parsed);
+      } catch (_) {
+        append(raw);
+      }
+    } else {
+      append(raw);
+    }
+  } else {
+    append(value);
+  }
+
+  const seen = new Set();
+  return urls.filter((url) => {
+    if (seen.has(url)) return false;
+    seen.add(url);
+    return true;
+  });
+};
+
+const normalizeCategoryImage = (category) => {
+  if (!category || typeof category !== 'object') return category;
+  const merged = [
+    ...toImageUrlList(category.image_urls),
+    ...toImageUrlList(category.images),
+    ...toImageUrlList(category.image_url),
+    ...toImageUrlList(category.image),
+  ];
+  const seen = new Set();
+  const imageUrls = merged.filter((url) => {
+    if (seen.has(url)) return false;
+    seen.add(url);
+    return true;
+  });
+  return {
+    ...category,
+    image_urls: imageUrls,
+    image_url: imageUrls[0] || '',
+  };
+};
+
 const CategoriesFixed = () => {
   // State for head categories
   const [headCategories, setHeadCategories] = useState([]);
@@ -76,7 +143,7 @@ const CategoriesFixed = () => {
         .order('name');
 
       if (error) throw error;
-      setHeadCategories(data || []);
+      setHeadCategories((data || []).map(normalizeCategoryImage));
     } catch (error) {
       toast({ title: 'Error', description: error.message, variant: 'destructive' });
     } finally {
@@ -95,7 +162,8 @@ const CategoriesFixed = () => {
         .order('name');
 
       if (error) throw error;
-      setSubCategories((prev) => ({ ...prev, [headCategoryId]: data || [] }));
+      const normalized = (data || []).map(normalizeCategoryImage);
+      setSubCategories((prev) => ({ ...prev, [headCategoryId]: normalized }));
     } catch (error) {
       toast({ title: 'Error', description: error.message, variant: 'destructive' });
     }
@@ -112,10 +180,11 @@ const CategoriesFixed = () => {
         .order('name');
 
       if (error) throw error;
-      setMicroCategories((prev) => ({ ...prev, [subCategoryId]: data || [] }));
+      const normalized = (data || []).map(normalizeCategoryImage);
+      setMicroCategories((prev) => ({ ...prev, [subCategoryId]: normalized }));
 
-      if (data && data.length > 0) {
-        data.forEach((micro) => {
+      if (normalized.length > 0) {
+        normalized.forEach((micro) => {
           fetchMicroMeta(micro.id);
         });
       }
@@ -444,7 +513,7 @@ const CategoriesFixed = () => {
 
   const openEditDialog = async (level, category, parentId = null) => {
     setDialogLevel(level);
-    setSelectedCategory(category);
+    setSelectedCategory(normalizeCategoryImage(category));
     setParentCategory(parentId ? { id: parentId } : null);
     setShowAddEditDialog(true);
   };

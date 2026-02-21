@@ -94,6 +94,72 @@ const safeApiJson = async (response) => {
   }
 };
 
+const isMissingColumnError = (error, columnName = '') => {
+  if (!error) return false;
+  const message = String(error.message || '').toLowerCase();
+  const column = String(columnName || '').toLowerCase();
+  const hasColumnMatch = !column || message.includes(column);
+
+  if (!hasColumnMatch) return false;
+
+  return (
+    error.code === '42703' ||
+    (message.includes('column') && message.includes('does not exist')) ||
+    (message.includes('could not find') && message.includes('schema cache'))
+  );
+};
+
+const buildProductInsertPayloadCandidates = (productData, actorId) => {
+  const basePayload = {
+    ...productData,
+    status: 'ACTIVE',
+    created_at: new Date().toISOString(),
+  };
+
+  const candidates = [
+    { ...basePayload, created_by: actorId },
+    { ...basePayload, created_by_user_id: actorId },
+    basePayload,
+  ];
+
+  const seen = new Set();
+  return candidates.filter((payload) => {
+    const key = JSON.stringify(payload);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
+const insertProductWithCompat = async (productData, actorId) => {
+  const payloadCandidates = buildProductInsertPayloadCandidates(productData, actorId);
+  let recoverableError = null;
+
+  for (const payload of payloadCandidates) {
+    const { data, error } = await supabase
+      .from('products')
+      .insert([payload])
+      .select()
+      .single();
+
+    if (!error) return data;
+
+    const creatorColumnMissing =
+      isMissingColumnError(error, 'created_by') ||
+      isMissingColumnError(error, 'created_by_user_id');
+
+    if (creatorColumnMissing) {
+      recoverableError = error;
+      continue;
+    }
+
+    throw error;
+  }
+
+  if (recoverableError) throw recoverableError;
+  throw new Error('Unable to save product');
+};
+
 const postKycAction = async (vendorId, action, body = {}) => {
   if (!vendorId) throw new Error('Vendor ID is required');
   const response = await fetchWithCsrf(apiUrl(`/api/kyc/vendors/${vendorId}/${action}`), {
@@ -753,21 +819,7 @@ export const dataEntryApi = {
       const emp = await getEmployeeContext();
       const user = await getUser();
       const actorId = emp?.user_id || user.id;
-      const payload = {
-        ...productData,
-        status: 'ACTIVE',
-        created_by: actorId,
-        created_at: new Date().toISOString()
-      };
-
-      const { data, error } = await supabase
-        .from('products')
-        .insert([payload])
-        .select()
-        .single();
-
-      if (error) throw error;
-      return data;
+      return await insertProductWithCompat(productData, actorId);
     } catch (error) {
       console.error('Error creating product:', error);
       throw error;
@@ -837,21 +889,7 @@ export const dataEntryApi = {
       const emp = await getEmployeeContext();
       const user = await getUser();
       const actorId = emp?.user_id || user.id;
-      const payload = {
-        ...productData,
-        status: 'ACTIVE',
-        created_by: actorId,
-        created_at: new Date().toISOString()
-      };
-
-      const { data, error } = await supabase
-        .from('products')
-        .insert([payload])
-        .select()
-        .single();
-
-      if (error) throw error;
-      return data;
+      return await insertProductWithCompat(productData, actorId);
     } catch (error) {
       console.error('Error adding product:', error);
       throw error;
@@ -964,21 +1002,42 @@ export const dataEntryApi = {
 
   uploadProductMedia: async (file, type) => {
     try {
-      const timestamp = Date.now();
-      const filename = `${type}_${timestamp}_${file.name}`;
-      const path = `products/${type}s/${filename}`;
+      if (!file) throw new Error('No file selected');
 
-      const { error: uploadError } = await supabase.storage
-        .from('product-media')
-        .upload(path, file);
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result || ''));
+        reader.onerror = () => reject(new Error('Failed to read file'));
+        reader.readAsDataURL(file);
+      });
 
-      if (uploadError) throw uploadError;
+      const response = await fetchWithCsrf(apiUrl('/api/employee/product-media-upload'), {
+        method: 'POST',
+        body: JSON.stringify({
+          type,
+          file_name: file.name || 'upload-file',
+          content_type: file.type || '',
+          data_url: dataUrl,
+        }),
+      });
 
-      const { data } = supabase.storage
-        .from('product-media')
-        .getPublicUrl(path);
+      let payload = null;
+      try {
+        payload = await response.json();
+      } catch (_) {
+        payload = null;
+      }
 
-      return data.publicUrl;
+      if (!response.ok || !payload?.success) {
+        throw new Error(payload?.error || `Upload failed (${response.status})`);
+      }
+
+      const publicUrl = String(payload?.publicUrl || '').trim();
+      if (!publicUrl) {
+        throw new Error('Upload succeeded but public URL was not returned');
+      }
+
+      return publicUrl;
     } catch (error) {
       console.error('Error uploading media:', error);
       throw error;

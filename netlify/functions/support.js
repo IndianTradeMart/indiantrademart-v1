@@ -17,7 +17,7 @@ const json = (statusCode, body) => ({
   headers: {
     "Content-Type": "application/json",
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-CSRF-Token",
     "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
   },
   body: JSON.stringify(body),
@@ -26,6 +26,8 @@ const json = (statusCode, body) => ({
 const ok = (b) => json(200, b);
 const bad = (msg, details) => json(400, { success: false, error: msg, details });
 const fail = (msg, details) => json(500, { success: false, error: msg, details });
+const SUPPORT_TICKET_SELECT =
+  "*, vendors(company_name, email, owner_name, vendor_id), buyers(id, full_name, email, company_name)";
 
 function parseTail(eventPath) {
   const parts = String(eventPath || "").split("/").filter(Boolean);
@@ -134,10 +136,10 @@ export async function handler(event) {
     // GET /tickets
     // -------------------------
     if (event.httpMethod === "GET" && root === "tickets" && tail.length === 1) {
-      const { status, priority, search, page = 1, pageSize = 100 } = event.queryStringParameters || {};
+      const { status, priority, search, scope = "ALL", page = 1, pageSize = 100 } = event.queryStringParameters || {};
       let query = supabase
         .from("support_tickets")
-        .select("*", { count: "exact" })
+        .select(SUPPORT_TICKET_SELECT, { count: "exact" })
         .order("created_at", { ascending: false });
 
       if (status && status !== "ALL") query = query.eq("status", status);
@@ -147,6 +149,13 @@ export async function handler(event) {
         query = query.or(
           `subject.ilike.%${term}%,description.ilike.%${term}%,ticket_display_id.ilike.%${term}%`
         );
+      }
+
+      const scopeValue = String(scope || "").toUpperCase();
+      if (scopeValue === "VENDOR") {
+        query = query.not("vendor_id", "is", null);
+      } else if (scopeValue === "BUYER") {
+        query = query.not("buyer_id", "is", null);
       }
 
       const offset = (Number(page) - 1) * Number(pageSize);
@@ -171,7 +180,7 @@ export async function handler(event) {
     if (event.httpMethod === "GET" && root === "tickets" && id && tail.length === 2) {
       const { data, error } = await supabase
         .from("support_tickets")
-        .select("*")
+        .select(SUPPORT_TICKET_SELECT)
         .eq("id", id)
         .maybeSingle();
       if (error || !data) return json(404, { error: "Ticket not found" });
@@ -385,6 +394,67 @@ export async function handler(event) {
       }
 
       return ok({ success: true, message: "Ticket status updated successfully", ticket: data });
+    }
+
+    // -------------------------
+    // POST /tickets/:id/notify-customer
+    // -------------------------
+    if (event.httpMethod === "POST" && root === "tickets" && id && action === "notify-customer") {
+      let body = {};
+      try {
+        body = event.body ? JSON.parse(event.body) : {};
+      } catch {
+        body = {};
+      }
+
+      const rawMessage = String(body?.message || "").trim();
+
+      const { data: ticket, error: ticketError } = await supabase
+        .from("support_tickets")
+        .select("id, ticket_display_id, subject, description, category, vendor_id, buyer_id")
+        .eq("id", id)
+        .maybeSingle();
+
+      if (ticketError || !ticket) {
+        return json(404, { error: "Ticket not found" });
+      }
+
+      const { vendorUserId, buyerUserId } = await getTicketUsers(ticket);
+      if (!vendorUserId && !buyerUserId) {
+        return bad("No linked vendor or buyer found for this ticket");
+      }
+
+      const message = rawMessage || ticket.description || ticket.subject || "Support update available";
+      const title = ticket.subject
+        ? `Support update: ${ticket.subject}`
+        : `Support update: ${ticket.ticket_display_id || ticket.id}`;
+
+      let sent = 0;
+      if (vendorUserId) {
+        const vendorLink = String(ticket.category || "").toUpperCase().includes("KYC")
+          ? "/vendor/profile?tab=kyc"
+          : "/vendor/support";
+        await notifyUser({
+          user_id: vendorUserId,
+          type: "SUPPORT_ALERT",
+          title,
+          message,
+          link: vendorLink,
+        });
+        sent += 1;
+      }
+      if (buyerUserId) {
+        await notifyUser({
+          user_id: buyerUserId,
+          type: "SUPPORT_ALERT",
+          title,
+          message,
+          link: "/buyer/tickets",
+        });
+        sent += 1;
+      }
+
+      return ok({ success: true, notified: sent });
     }
 
     // -------------------------

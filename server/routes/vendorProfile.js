@@ -65,6 +65,17 @@ const buildUploadPath = ({ vendorId, originalName, contentType }) => {
   return `${vendorId}/${Date.now()}-${randomUUID()}-${fileName}`;
 };
 
+const isBucketMissingError = (error) => {
+  const msg = String(error?.message || '').toLowerCase();
+  return msg.includes('bucket not found') || (msg.includes('bucket') && msg.includes('not found'));
+};
+
+const getUploadBucketCandidates = (bucket) => {
+  if (bucket === 'product-images') return ['product-images', 'product-media', 'avatars'];
+  if (bucket === 'product-media') return ['product-media', 'product-images', 'avatars'];
+  return [bucket];
+};
+
 const VENDOR_UPDATE_BLOCK = new Set([
   'id',
   'user_id',
@@ -1049,21 +1060,37 @@ router.post('/me/upload', requireAuth({ roles: ['VENDOR'] }), async (req, res) =
       contentType,
     });
 
-    const { error: uploadError } = await supabase.storage
-      .from(bucket)
-      .upload(objectPath, buffer, {
-        contentType,
-        upsert: true,
-      });
+    const bucketCandidates = getUploadBucketCandidates(bucket);
+    let uploadedBucket = null;
+    let lastUploadError = null;
 
-    if (uploadError) {
-      return res.status(500).json({ success: false, error: uploadError.message || 'Upload failed' });
+    for (const candidateBucket of bucketCandidates) {
+      const { error: uploadError } = await supabase.storage
+        .from(candidateBucket)
+        .upload(objectPath, buffer, {
+          contentType,
+          upsert: true,
+        });
+
+      if (!uploadError) {
+        uploadedBucket = candidateBucket;
+        break;
+      }
+
+      lastUploadError = uploadError;
+      if (!isBucketMissingError(uploadError)) {
+        break;
+      }
     }
 
-    const { data } = supabase.storage.from(bucket).getPublicUrl(objectPath);
+    if (!uploadedBucket) {
+      return res.status(500).json({ success: false, error: lastUploadError?.message || 'Upload failed' });
+    }
+
+    const { data } = supabase.storage.from(uploadedBucket).getPublicUrl(objectPath);
     return res.json({
       success: true,
-      bucket,
+      bucket: uploadedBucket,
       path: objectPath,
       publicUrl: data?.publicUrl || null,
     });

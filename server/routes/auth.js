@@ -702,6 +702,7 @@ router.post('/register', async (req, res) => {
     const full_name = String(req.body?.full_name || '').trim() || undefined;
     const role = normalizeRole(req.body?.role || 'USER');
     const phone = String(req.body?.phone || '').trim() || undefined;
+    const noSession = req.body?.no_session === true;
     const buyerProfileInput = parseBuyerProfileInput(req.body);
 
     if (!email || !password) {
@@ -774,7 +775,7 @@ router.post('/register', async (req, res) => {
       });
     }
 
-    const payload = issueSession(res, user);
+    const payload = buildAuthUserPayload(user);
     if (buyerProfile) {
       payload.buyer_id = buyerProfile.id || null;
       payload.is_active =
@@ -782,7 +783,20 @@ router.post('/register', async (req, res) => {
       payload.account_status = deriveBuyerAccountStatus(buyerProfile);
       payload.suspension_reason = buyerProfile.terminated_reason || null;
     }
-    return res.json({ success: true, user: payload });
+
+    if (noSession) {
+      return res.json({ success: true, user: payload, session_skipped: true });
+    }
+
+    const sessionPayload = issueSession(res, user);
+    if (buyerProfile) {
+      sessionPayload.buyer_id = payload.buyer_id;
+      sessionPayload.is_active = payload.is_active;
+      sessionPayload.account_status = payload.account_status;
+      sessionPayload.suspension_reason = payload.suspension_reason;
+    }
+
+    return res.json({ success: true, user: sessionPayload });
   } catch (error) {
     console.error('[Auth] Register failed:', error?.message || error);
     return res.status(500).json({ success: false, error: 'Registration failed' });

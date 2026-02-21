@@ -27,6 +27,188 @@ const ensureRowExists = async (table, id, notFoundMessage) => {
   if (!data?.id) throw new Error(notFoundMessage);
 };
 
+const isMissingColumnError = (error) => {
+  if (!error) return false;
+  const message = String(error.message || '');
+  return (
+    error.code === '42703' ||
+    /column .* does not exist/i.test(message) ||
+    /could not find the ['"].*['"] column .* schema cache/i.test(message)
+  );
+};
+
+const normalizeImageValue = (value) => {
+  const url = String(value || '').trim();
+  return url || null;
+};
+
+const normalizeImageListValue = (value) => {
+  const collected = [];
+  const append = (entry) => {
+    if (entry == null) return;
+
+    if (typeof entry === 'string') {
+      const clean = normalizeImageValue(entry);
+      if (clean) collected.push(clean);
+      return;
+    }
+
+    if (Array.isArray(entry)) {
+      entry.forEach(append);
+      return;
+    }
+
+    if (typeof entry === 'object') {
+      const url = normalizeImageValue(entry.url || entry.image_url || entry.src || '');
+      if (url) collected.push(url);
+    }
+  };
+
+  if (typeof value === 'string') {
+    const raw = value.trim();
+    if (raw.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(raw);
+        append(parsed);
+      } catch (_) {
+        append(raw);
+      }
+    } else {
+      append(raw);
+    }
+  } else {
+    append(value);
+  }
+
+  const seen = new Set();
+  return collected.filter((url) => {
+    if (seen.has(url)) return false;
+    seen.add(url);
+    return true;
+  });
+};
+
+const ensureFileList = (value) => {
+  if (Array.isArray(value)) return value.filter(Boolean);
+  if (!value) return [];
+  return [value];
+};
+
+const normalizeCategoryImages = (row, maxImages = 1) => {
+  if (!row || typeof row !== 'object') return row;
+  const mergedUrls = [
+    ...normalizeImageListValue(row.image_urls),
+    ...normalizeImageListValue(row.images),
+    ...normalizeImageListValue(row.image_url),
+    ...normalizeImageListValue(row.image),
+  ];
+
+  const seen = new Set();
+  const urls = mergedUrls
+    .filter((url) => {
+      if (seen.has(url)) return false;
+      seen.add(url);
+      return true;
+    })
+    .slice(0, maxImages);
+
+  return {
+    ...row,
+    image_urls: urls,
+    image_url: urls[0] || null,
+  };
+};
+
+const normalizeSubCategoryImage = (row) => {
+  return normalizeCategoryImages(row, 1);
+};
+
+const normalizeMicroCategoryImage = (row) => normalizeCategoryImages(row, 2);
+
+const isRecoverableImageWriteError = (error) => {
+  if (!error) return false;
+  if (isMissingColumnError(error)) return true;
+  const message = String(error.message || '').toLowerCase();
+  return (
+    message.includes('image_url') ||
+    message.includes('image_urls') ||
+    message.includes('column images') ||
+    message.includes('column "images"') ||
+    (message.includes('images') && message.includes('does not exist')) ||
+    (message.includes('invalid input syntax') && message.includes('image'))
+  );
+};
+
+const uniquePayloads = (payloads) => {
+  const seen = new Set();
+  return payloads.filter((payload) => {
+    const key = JSON.stringify(payload);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+};
+
+const buildMicroImageValues = async (categoryData = {}) => {
+  const requestedImageUrls = normalizeImageListValue(categoryData.image_urls);
+  const fallbackImageUrl = normalizeImageValue(categoryData.image_url);
+  const combinedImageUrls = fallbackImageUrl
+    ? [...requestedImageUrls, fallbackImageUrl]
+    : requestedImageUrls;
+
+  const keptImageUrls = [...new Set(combinedImageUrls)].slice(0, 2);
+  const uploadFiles = [...ensureFileList(categoryData.imageFiles), ...ensureFileList(categoryData.imageFile)];
+
+  if (keptImageUrls.length + uploadFiles.length > 2) {
+    throw new Error('You can only upload 2 images');
+  }
+
+  const uploadedUrls = [];
+  for (const file of uploadFiles) {
+    const uploaded = await uploadCategoryImage({ level: 'micro', slug: categoryData.slug, file });
+    if (uploaded) uploadedUrls.push(uploaded);
+  }
+
+  let finalImageUrls = [...new Set([...keptImageUrls, ...uploadedUrls])].slice(0, 2);
+
+  if (categoryData.removeImage && keptImageUrls.length === 0 && uploadFiles.length === 0) {
+    finalImageUrls = [];
+  }
+
+  return {
+    imageUrls: finalImageUrls,
+    primaryImageUrl: finalImageUrls[0] || null,
+  };
+};
+
+const serializeImageUrlsForSingleColumn = (value) => {
+  const urls = normalizeImageListValue(value).slice(0, 2);
+  if (!urls.length) return null;
+  if (urls.length === 1) return urls[0];
+  return JSON.stringify(urls);
+};
+
+const buildMicroPayloadCandidates = ({ basePayload, primaryImageUrl, imageUrls }) =>
+  (() => {
+    const normalizedUrls = normalizeImageListValue(imageUrls).slice(0, 2);
+    const serializedUrls = serializeImageUrlsForSingleColumn(normalizedUrls);
+    return uniquePayloads([
+      { ...basePayload, image_url: primaryImageUrl, images: normalizedUrls },
+      { ...basePayload, image_url: primaryImageUrl, image_urls: normalizedUrls },
+      { ...basePayload, image_url: primaryImageUrl, image: serializedUrls },
+      { ...basePayload, image_url: serializedUrls },
+      { ...basePayload, image: serializedUrls },
+      { ...basePayload, image_url: primaryImageUrl },
+    ]);
+  })();
+
+const buildSingleImagePayloadCandidates = ({ basePayload, imageUrl }) =>
+  uniquePayloads([
+    { ...basePayload, image_url: imageUrl, image: imageUrl },
+    { ...basePayload, image_url: imageUrl },
+    { ...basePayload, image: imageUrl },
+  ]);
+
 // --- CATEGORY IMAGE UPLOAD ---
 const CATEGORY_IMAGE_MIN_BYTES = 100 * 1024; // 100KB
 const CATEGORY_IMAGE_MAX_BYTES = 800 * 1024; // 800KB
@@ -95,6 +277,30 @@ const uploadCategoryImage = async ({ level, slug, file }) => {
   return publicUrl;
 };
 
+const updateCategoryViaServer = async ({ level, id, payload }) => {
+  const response = await fetchWithCsrf(apiUrl('/api/employee/category-update'), {
+    method: 'POST',
+    body: JSON.stringify({
+      level,
+      id,
+      payload,
+    }),
+  });
+
+  let body = null;
+  try {
+    body = await response.json();
+  } catch (_) {
+    body = null;
+  }
+
+  if (!response.ok || !body?.success) {
+    throw new Error(body?.error || `Category update failed (${response.status})`);
+  }
+
+  return body;
+};
+
 // HEAD CATEGORIES
 export const headCategoryApi = {
   getAll: async () => {
@@ -103,7 +309,7 @@ export const headCategoryApi = {
       .select('*')
       .order('name');
     if (error) throw error;
-    return data;
+    return (data || []).map((row) => normalizeCategoryImages(row, 1));
   },
 
   getActive: async () => {
@@ -113,7 +319,7 @@ export const headCategoryApi = {
       .eq('is_active', true)
       .order('name');
     if (error) throw error;
-    return data;
+    return (data || []).map((row) => normalizeCategoryImages(row, 1));
   },
 
   create: async (categoryData) => {
@@ -215,7 +421,7 @@ export const subCategoryApi = {
       .order('name');
 
     if (error) throw error;
-    return data;
+    return (data || []).map(normalizeSubCategoryImage);
   },
 
   getActiveByHeadCategory: async (headCategoryId) => {
@@ -227,7 +433,7 @@ export const subCategoryApi = {
       .order('name');
 
     if (error) throw error;
-    return data;
+    return (data || []).map(normalizeSubCategoryImage);
   },
 
   create: async (categoryData, headCategoryId) => {
@@ -239,21 +445,41 @@ export const subCategoryApi = {
     }
     if (removeImage) finalImageUrl = null;
 
-    const { data, error } = await supabase
-      .from('sub_categories')
-      .insert([{
-        head_category_id: headCategoryId,
-        name: name.trim(),
-        slug: slug.trim(),
-        description: description?.trim() || null,
-        image_url: finalImageUrl,
-        is_active: is_active !== false
-      }])
-      .select()
-      .single();
+    const basePayload = {
+      head_category_id: headCategoryId,
+      name: name.trim(),
+      slug: slug.trim(),
+      description: description?.trim() || null,
+      is_active: is_active !== false
+    };
 
-    if (error) throw error;
-    return data;
+    const candidatePayloads = buildSingleImagePayloadCandidates({
+      basePayload,
+      imageUrl: finalImageUrl,
+    });
+
+    let recoverableError = null;
+    for (const payload of candidatePayloads) {
+      const response = await supabase
+        .from('sub_categories')
+        .insert([payload])
+        .select()
+        .single();
+
+      if (!response.error) {
+        return normalizeSubCategoryImage(response.data);
+      }
+
+      if (isRecoverableImageWriteError(response.error)) {
+        recoverableError = response.error;
+        continue;
+      }
+
+      throw response.error;
+    }
+
+    if (recoverableError) throw recoverableError;
+    throw new Error('Unable to create sub category');
   },
 
   update: async (id, categoryData) => {
@@ -268,19 +494,66 @@ export const subCategoryApi = {
     }
     if (removeImage) finalImageUrl = null;
 
-    const { error } = await supabase
-      .from('sub_categories')
-      .update({
-        name: name.trim(),
-        slug: slug.trim(),
-        description: description?.trim() || null,
-        image_url: finalImageUrl,
-        is_active: is_active !== false
-      })
-      .eq('id', categoryId);
+    const basePayload = {
+      name: name.trim(),
+      slug: slug.trim(),
+      description: description?.trim() || null,
+      is_active: is_active !== false
+    };
 
-    if (error) throw error;
-    return { id: categoryId };
+    const candidatePayloads = buildSingleImagePayloadCandidates({
+      basePayload,
+      imageUrl: finalImageUrl,
+    });
+
+    let recoverableError = null;
+    for (const payload of candidatePayloads) {
+      const response = await supabase
+        .from('sub_categories')
+        .update(payload)
+        .eq('id', categoryId)
+        .select('id')
+        .maybeSingle();
+
+      if (!response.error) {
+        if (response.data?.id) return { id: categoryId };
+        await updateCategoryViaServer({
+          level: 'sub',
+          id: categoryId,
+          payload,
+        });
+        return { id: categoryId };
+      }
+
+      if (response.error.code === '42501') {
+        await updateCategoryViaServer({
+          level: 'sub',
+          id: categoryId,
+          payload,
+        });
+        return { id: categoryId };
+      }
+
+      if (isRecoverableImageWriteError(response.error)) {
+        recoverableError = response.error;
+        continue;
+      }
+
+      throw response.error;
+    }
+
+    const fallbackPayload = candidatePayloads[candidatePayloads.length - 1] || basePayload;
+    try {
+      await updateCategoryViaServer({
+        level: 'sub',
+        id: categoryId,
+        payload: fallbackPayload,
+      });
+      return { id: categoryId };
+    } catch (_) {
+      if (recoverableError) throw recoverableError;
+      throw new Error('Unable to update sub category');
+    }
   },
 
   delete: async (id) => {
@@ -330,7 +603,7 @@ export const microCategoryApi = {
       .order('name');
 
     if (error) throw error;
-    return data;
+    return (data || []).map(normalizeMicroCategoryImage);
   },
 
   getActiveBySubCategory: async (subCategoryId) => {
@@ -342,58 +615,118 @@ export const microCategoryApi = {
       .order('name');
 
     if (error) throw error;
-    return data;
+    return (data || []).map(normalizeMicroCategoryImage);
   },
 
   create: async (categoryData, subCategoryId) => {
-    const { name, slug, is_active, image_url, imageFile, removeImage } = categoryData;
+    const { name, slug, is_active } = categoryData;
+    const { imageUrls, primaryImageUrl } = await buildMicroImageValues(categoryData);
 
-    let finalImageUrl = (image_url || '').trim() || null;
-    if (imageFile) {
-      finalImageUrl = await uploadCategoryImage({ level: 'micro', slug, file: imageFile });
+    const basePayload = {
+      sub_category_id: subCategoryId,
+      name: name.trim(),
+      slug: slug.trim(),
+      is_active: is_active !== false,
+    };
+
+    const candidatePayloads = buildMicroPayloadCandidates({
+      basePayload,
+      primaryImageUrl,
+      imageUrls,
+    });
+
+    let recoverableError = null;
+    for (const payload of candidatePayloads) {
+      const response = await supabase
+        .from('micro_categories')
+        .insert([payload])
+        .select()
+        .single();
+
+      if (!response.error) {
+        return normalizeMicroCategoryImage(response.data);
+      }
+
+      if (isRecoverableImageWriteError(response.error)) {
+        recoverableError = response.error;
+        continue;
+      }
+
+      throw response.error;
     }
-    if (removeImage) finalImageUrl = null;
 
-    const { data, error } = await supabase
-      .from('micro_categories')
-      .insert([{
-        sub_category_id: subCategoryId,
-        name: name.trim(),
-        slug: slug.trim(),
-        image_url: finalImageUrl,
-        is_active: is_active !== false
-      }])
-      .select()
-      .single();
-
-    if (error) throw error;
-    return data;
+    if (recoverableError) throw recoverableError;
+    throw new Error('Unable to create micro category');
   },
 
   update: async (id, categoryData) => {
-    const { name, slug, is_active, image_url, imageFile, removeImage } = categoryData;
+    const { name, slug, is_active } = categoryData;
     const categoryId = String(id || '').trim();
 
     await ensureRowExists('micro_categories', categoryId, 'Micro category not found. Please refresh and try again.');
 
-    let finalImageUrl = (image_url || '').trim() || null;
-    if (imageFile) {
-      finalImageUrl = await uploadCategoryImage({ level: 'micro', slug, file: imageFile });
+    const { imageUrls, primaryImageUrl } = await buildMicroImageValues(categoryData);
+
+    const basePayload = {
+      name: name.trim(),
+      slug: slug.trim(),
+      is_active: is_active !== false,
+    };
+
+    const candidatePayloads = buildMicroPayloadCandidates({
+      basePayload,
+      primaryImageUrl,
+      imageUrls,
+    });
+
+    let recoverableError = null;
+    for (const payload of candidatePayloads) {
+      const response = await supabase
+        .from('micro_categories')
+        .update(payload)
+        .eq('id', categoryId)
+        .select('id')
+        .maybeSingle();
+
+      if (!response.error) {
+        if (response.data?.id) return { id: categoryId };
+        await updateCategoryViaServer({
+          level: 'micro',
+          id: categoryId,
+          payload,
+        });
+        return { id: categoryId };
+      }
+
+      if (response.error.code === '42501') {
+        await updateCategoryViaServer({
+          level: 'micro',
+          id: categoryId,
+          payload,
+        });
+        return { id: categoryId };
+      }
+
+      if (isRecoverableImageWriteError(response.error)) {
+        recoverableError = response.error;
+        continue;
+      }
+
+      throw response.error;
     }
-    if (removeImage) finalImageUrl = null;
 
-    const { error } = await supabase
-      .from('micro_categories')
-      .update({
-        name: name.trim(),
-        slug: slug.trim(),
-        image_url: finalImageUrl,
-        is_active: is_active !== false
-      })
-      .eq('id', categoryId);
-
-    if (error) throw error;
-    return { id: categoryId };
+    const fallbackPayload = candidatePayloads[candidatePayloads.length - 1] || basePayload;
+    try {
+      await updateCategoryViaServer({
+        level: 'micro',
+        id: categoryId,
+        payload: fallbackPayload,
+      });
+      return { id: categoryId };
+    } catch (_) {
+      if (recoverableError) throw recoverableError;
+      throw new Error('Unable to update micro category');
+    }
   },
 
   delete: async (id) => {

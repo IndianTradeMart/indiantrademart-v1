@@ -1,3 +1,5 @@
+/api/chat  /.netlify/functions/chatbot  200
+/api/chat/*  /.netlify/functions/chatbot/:splat  200
 /api/*  /.netlify/functions/:splat  200
 
 /@vite/*  /@vite/:splat  200

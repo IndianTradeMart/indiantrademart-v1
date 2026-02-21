@@ -45,6 +45,7 @@ const normalizeRole = (role) => {
   if (raw === 'FINACE') return 'FINANCE';
   return raw;
 };
+const BUYER_NOT_REGISTERED_MESSAGE = 'This email is not registered as buyer';
 
 const BUYER_AVATAR_MAX_BYTES = 5 * 1024 * 1024;
 const BUYER_AVATAR_ALLOWED_MIME = new Set([
@@ -762,6 +763,36 @@ const resolveBuyerAccessUser = async (user) => {
   return { user: ensuredUser, buyer: buyer || buyerByIdentity, upgraded: true };
 };
 
+const resolveVendorProfileForUser = async (user) => {
+  if (!user?.id && !user?.email) return null;
+  let vendor = null;
+
+  if (user?.id) {
+    const { data } = await supabase
+      .from('vendors')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    vendor = data || null;
+  }
+
+  if (!vendor && user?.email) {
+    const normalizedEmail = normalizeEmail(user.email);
+    const { data } = await supabase
+      .from('vendors')
+      .select('*')
+      .ilike('email', normalizedEmail)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    vendor = data || null;
+  }
+
+  return vendor;
+};
+
 const parseBuyerProfileUpdates = (body = {}) => {
   const updates = {};
 
@@ -912,9 +943,43 @@ export const handler = async (event) => {
       const body = readBody(event);
       const email = normalizeEmail(body?.email);
       const password = String(body?.password || '');
+      const roleHint = normalizeRole(body?.role || body?.role_hint || body?.roleHint || '');
 
       if (!email || !password) return bad(event, 'Email and password are required');
       if (!isValidEmail(email)) return bad(event, 'Invalid email format');
+
+      // Strict buyer portal isolation:
+      // buyer login requires an existing buyer identity by email
+      // and must not use vendor-only identities.
+      if (roleHint === 'BUYER') {
+        const { data: buyerByEmail, error: buyerLookupError } = await supabase
+          .from('buyers')
+          .select('id')
+          .ilike('email', email)
+          .limit(1)
+          .maybeSingle();
+
+        if (buyerLookupError) {
+          // eslint-disable-next-line no-console
+          console.error('[Auth] Buyer lookup failed during login:', buyerLookupError?.message || buyerLookupError);
+          return fail(event, 'Login failed');
+        }
+
+        if (!buyerByEmail?.id) {
+          return forbidden(event, BUYER_NOT_REGISTERED_MESSAGE);
+        }
+
+        const { data: vendorByEmail } = await supabase
+          .from('vendors')
+          .select('id')
+          .ilike('email', email)
+          .limit(1)
+          .maybeSingle();
+
+        if (vendorByEmail?.id) {
+          return forbidden(event, BUYER_NOT_REGISTERED_MESSAGE);
+        }
+      }
 
       let user = await getPublicUserByEmail(email);
 
@@ -963,8 +1028,73 @@ export const handler = async (event) => {
       }
 
       user = await ensureUserRole(user);
+      const currentRole = normalizeRole(user?.role || 'USER');
       let buyerProfile = null;
-      if (normalizeRole(user?.role) === 'BUYER') {
+
+      // Vendor portal fallback: if caller hinted VENDOR and vendor identity exists,
+      // align public user role to VENDOR for this session.
+      if (roleHint === 'VENDOR') {
+        const vendor = await resolveVendorProfileForUser(user);
+        if (!vendor) {
+          return forbidden(event, 'Vendor profile not found');
+        }
+
+        user = await upsertPublicUser({
+          id: user.id,
+          email: user.email,
+          full_name: user.full_name,
+          role: 'VENDOR',
+          phone: user.phone || vendor.phone || null,
+          password_hash: user.password_hash,
+          allowPasswordUpdate: false,
+        });
+
+        if (vendor.id && (!vendor.user_id || vendor.user_id !== user.id)) {
+          const { error: linkError } = await supabase
+            .from('vendors')
+            .update({ user_id: user.id })
+            .eq('id', vendor.id);
+
+          if (linkError) {
+            // eslint-disable-next-line no-console
+            console.warn('[Auth] Vendor relink failed during login:', linkError?.message || linkError);
+          }
+        }
+      }
+
+      // Buyer portal strict session:
+      // vendor accounts must not authenticate in buyer portal.
+      // only existing buyer identities are allowed to login as BUYER.
+      if (roleHint === 'BUYER') {
+        const vendorForUser = await resolveVendorProfileForUser(user);
+        if (currentRole === 'VENDOR' || vendorForUser?.id) {
+          return forbidden(event, BUYER_NOT_REGISTERED_MESSAGE);
+        }
+
+        const existingBuyer = await findBuyerProfileForUser(user);
+        if (!existingBuyer && currentRole !== 'BUYER') {
+          return forbidden(event, BUYER_NOT_REGISTERED_MESSAGE);
+        }
+
+        buyerProfile = await upsertBuyerProfile({
+          userId: user.id,
+          email: user.email,
+          full_name: user.full_name,
+          phone: user.phone,
+        });
+
+        user = await upsertPublicUser({
+          id: user.id,
+          email: user.email,
+          full_name: user.full_name,
+          role: 'BUYER',
+          phone: user.phone || buyerProfile?.phone || null,
+          password_hash: user.password_hash,
+          allowPasswordUpdate: false,
+        });
+      }
+
+      if (!buyerProfile && normalizeRole(user?.role) === 'BUYER') {
         try {
           buyerProfile = await resolveBuyerProfileForUser(user);
         } catch (profileError) {
@@ -999,6 +1129,7 @@ export const handler = async (event) => {
       const full_name = String(body?.full_name || '').trim() || undefined;
       const role = normalizeRole(body?.role || 'USER');
       const phone = String(body?.phone || '').trim() || undefined;
+      const noSession = body?.no_session === true;
       const buyerProfileInput = parseBuyerProfileInput(body);
 
       if (!email || !password) return bad(event, 'Email and password are required');
@@ -1008,7 +1139,9 @@ export const handler = async (event) => {
       }
 
       const existing = await getPublicUserByEmail(email);
-      if (existing?.id) return bad(event, 'Email already registered', null, 409);
+      if (existing?.id) {
+        return bad(event, 'A user with this email address has already been registered', null, 409);
+      }
 
       let userId = null;
       if (ENABLE_SUPABASE_AUTH_SIGNUP && supabase?.auth?.admin?.createUser) {
@@ -1020,6 +1153,10 @@ export const handler = async (event) => {
           app_metadata: { role },
         });
         if (error || !data?.user) {
+          const msg = String(error?.message || '').toLowerCase();
+          if (msg.includes('already') || msg.includes('exists') || msg.includes('registered')) {
+            return bad(event, 'A user with this email address has already been registered', null, 409);
+          }
           return bad(event, error?.message || 'Auth signup failed');
         }
         userId = data.user.id;
@@ -1058,6 +1195,16 @@ export const handler = async (event) => {
         payload.account_status = deriveBuyerAccountStatus(buyerProfile);
         payload.suspension_reason = buyerProfile.terminated_reason || null;
       }
+
+      if (noSession) {
+        return ok(event, {
+          success: true,
+          user: payload,
+          buyer: buyerProfile || null,
+          session_skipped: true,
+        });
+      }
+
       const { token, csrfToken } = issueSession(user);
       const cookies = setAuthCookies(token, csrfToken);
 

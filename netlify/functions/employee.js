@@ -86,8 +86,44 @@ const normalizeRole = (role) => String(role || '').trim().toUpperCase();
 const SALES_ROLES = new Set(['SALES', 'ADMIN', 'SUPERADMIN']);
 const CATEGORY_IMAGE_BUCKET = 'avatars';
 const CATEGORY_IMAGE_LEVELS = new Set(['head', 'sub', 'micro']);
+const CATEGORY_TABLE_BY_LEVEL = {
+  head: 'head_categories',
+  sub: 'sub_categories',
+  micro: 'micro_categories',
+};
 const CATEGORY_IMAGE_MIN_BYTES = 100 * 1024; // 100KB
 const CATEGORY_IMAGE_MAX_BYTES = 800 * 1024; // 800KB
+const PRODUCT_UPLOAD_MAX_BYTES = 10 * 1024 * 1024; // 10MB
+const PRODUCT_IMAGE_MIN_BYTES = 100 * 1024; // 100KB
+const PRODUCT_IMAGE_MAX_BYTES = 800 * 1024; // 800KB
+const DEFAULT_PRODUCT_UPLOAD_BUCKETS_BY_TYPE = {
+  image: ['product-images', 'product-media', 'objects', 'avatars'],
+  video: ['product-media', 'product-images', 'objects', 'avatars'],
+  pdf: ['product-media', 'objects', 'avatars'],
+};
+const sanitizeBucketName = (value = '') =>
+  String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]/g, '');
+const parseBucketList = (value = '') =>
+  Array.from(
+    new Set(
+      String(value || '')
+        .split(',')
+        .map((item) => sanitizeBucketName(item))
+        .filter(Boolean)
+    )
+  );
+const PRODUCT_SHARED_UPLOAD_BUCKETS = parseBucketList(
+  process.env.PRODUCT_UPLOAD_BUCKETS || process.env.PRODUCT_MEDIA_BUCKETS || ''
+);
+const resolveProductUploadBuckets = (type = '') => {
+  const normalizedType = String(type || '').trim().toLowerCase();
+  const defaults = DEFAULT_PRODUCT_UPLOAD_BUCKETS_BY_TYPE[normalizedType] || [];
+  const envSpecific = parseBucketList(process.env[`PRODUCT_${normalizedType.toUpperCase()}_BUCKETS`] || '');
+  return Array.from(new Set([...envSpecific, ...PRODUCT_SHARED_UPLOAD_BUCKETS, ...defaults]));
+};
 
 const MIME_EXT = {
   'image/jpeg': 'jpg',
@@ -98,6 +134,10 @@ const MIME_EXT = {
   'image/svg+xml': 'svg',
   'image/heic': 'heic',
   'image/heif': 'heif',
+  'application/pdf': 'pdf',
+  'video/mp4': 'mp4',
+  'video/webm': 'webm',
+  'video/quicktime': 'mov',
 };
 
 const safeNum = (v) => (typeof v === 'number' && !Number.isNaN(v) ? v : 0);
@@ -172,6 +212,46 @@ const sanitizeFilename = (value = '') =>
     .replace(/[^a-zA-Z0-9._-]/g, '_')
     .replace(/^_+/, '')
     .slice(0, 120) || 'image';
+
+const isBucketMissingError = (error) => {
+  const msg = String(error?.message || '').toLowerCase();
+  return msg.includes('bucket not found') || (msg.includes('bucket') && msg.includes('not found'));
+};
+const isBucketAlreadyExistsError = (error) => {
+  const msg = String(error?.message || '').toLowerCase();
+  return msg.includes('already exists') || (msg.includes('duplicate') && msg.includes('bucket'));
+};
+const ensurePublicBucket = async (supabase, bucketName) => {
+  const bucket = sanitizeBucketName(bucketName);
+  if (!bucket) return new Error('Invalid bucket name');
+  const { error } = await supabase.storage.createBucket(bucket, { public: true });
+  if (error && !isBucketAlreadyExistsError(error)) return error;
+  return null;
+};
+
+const normalizeProductUploadType = (value = '') => {
+  const t = String(value || '').trim().toLowerCase();
+  if (t === 'image' || t === 'video' || t === 'pdf') return t;
+  return null;
+};
+
+const inferProductUploadTypeFromMime = (mime = '') => {
+  const m = String(mime || '').trim().toLowerCase();
+  if (m.startsWith('image/')) return 'image';
+  if (m.startsWith('video/')) return 'video';
+  if (m === 'application/pdf') return 'pdf';
+  return null;
+};
+
+const buildProductUploadPath = ({ type, originalName, contentType }) => {
+  const safeName = sanitizeFilename(originalName || '');
+  const extFromMime = MIME_EXT[contentType] || '';
+  const hasExt = safeName.includes('.');
+  const base = hasExt ? safeName.replace(/\.[^/.]+$/, '') : safeName;
+  const ext = hasExt ? safeName.split('.').pop() : extFromMime || 'bin';
+  const finalName = `${base || type || 'upload'}.${ext}`;
+  return `product-media/${type}s/${Date.now()}-${randomUUID()}-${finalName}`;
+};
 
 const hasSalesAccess = (authRole, employeeRole) => {
   const a = normalizeRole(authRole || '');
@@ -355,6 +435,164 @@ export const handler = async (event) => {
         path: objectPath,
         publicUrl: data?.publicUrl || null,
       });
+    }
+
+    // POST /api/employee/product-media-upload
+    if (event.httpMethod === 'POST' && tail[0] === 'product-media-upload') {
+      const employee = await resolveEmployeeProfile(supabase, authUser);
+      if (!employee) return json(404, { success: false, error: 'Employee profile not found' });
+
+      const body = readBody(event);
+      const requestedType = normalizeProductUploadType(body?.type || '');
+      const dataUrl = String(body?.data_url || body?.dataUrl || '').trim();
+      const originalName = sanitizeFilename(body?.file_name || body?.fileName || '');
+      const explicitType = String(body?.content_type || body?.contentType || '').trim();
+
+      if (!dataUrl) {
+        return json(400, { success: false, error: 'data_url is required' });
+      }
+
+      const parsed = parseDataUrl(dataUrl);
+      if (!parsed?.base64) {
+        return json(400, { success: false, error: 'Invalid base64 payload' });
+      }
+
+      const contentType = explicitType || parsed.mime || 'application/octet-stream';
+      const inferredType = inferProductUploadTypeFromMime(contentType);
+      const finalType = requestedType || inferredType;
+
+      const buckets = resolveProductUploadBuckets(finalType);
+      if (!finalType || !buckets.length) {
+        return json(400, { success: false, error: 'Unsupported upload type' });
+      }
+      if (!inferredType || inferredType !== finalType) {
+        return json(400, { success: false, error: 'File type does not match upload type' });
+      }
+
+      const buffer = Buffer.from(parsed.base64, 'base64');
+      if (!buffer?.length) {
+        return json(400, { success: false, error: 'Empty upload payload' });
+      }
+      if (buffer.length > PRODUCT_UPLOAD_MAX_BYTES) {
+        return json(413, { success: false, error: 'File too large (max 10MB)' });
+      }
+      if (finalType === 'image') {
+        if (buffer.length < PRODUCT_IMAGE_MIN_BYTES) {
+          return json(400, { success: false, error: 'Image too small (minimum 100KB)' });
+        }
+        if (buffer.length > PRODUCT_IMAGE_MAX_BYTES) {
+          return json(413, { success: false, error: 'Image too large (maximum 800KB)' });
+        }
+      }
+
+      const objectPath = buildProductUploadPath({
+        type: finalType,
+        originalName,
+        contentType,
+      });
+
+      let uploadedBucket = null;
+      let lastUploadError = null;
+      const uploadOptions = {
+        contentType,
+        upsert: true,
+      };
+
+      for (const bucket of buckets) {
+        let { error: uploadError } = await supabase.storage
+          .from(bucket)
+          .upload(objectPath, buffer, uploadOptions);
+        const bucketMissingOnInitialTry = !!uploadError && isBucketMissingError(uploadError);
+
+        if (bucketMissingOnInitialTry) {
+          const bucketCreateError = await ensurePublicBucket(supabase, bucket);
+          if (!bucketCreateError) {
+            const retryUpload = await supabase.storage.from(bucket).upload(objectPath, buffer, uploadOptions);
+            uploadError = retryUpload.error || null;
+          } else {
+            uploadError = bucketCreateError;
+          }
+        }
+
+        if (!uploadError) {
+          uploadedBucket = bucket;
+          break;
+        }
+
+        lastUploadError = uploadError;
+        if (!bucketMissingOnInitialTry && !isBucketMissingError(uploadError)) {
+          break;
+        }
+      }
+
+      if (!uploadedBucket) {
+        const errorMessage = isBucketMissingError(lastUploadError)
+          ? `Upload storage bucket not found. Checked: ${buckets.join(', ')}`
+          : lastUploadError?.message || 'Upload failed';
+        return json(500, { success: false, error: errorMessage });
+      }
+
+      const { data } = supabase.storage.from(uploadedBucket).getPublicUrl(objectPath);
+      return json(200, {
+        success: true,
+        bucket: uploadedBucket,
+        path: objectPath,
+        publicUrl: data?.publicUrl || null,
+      });
+    }
+
+    // POST /api/employee/category-update
+    if (event.httpMethod === 'POST' && tail[0] === 'category-update') {
+      const employee = await resolveEmployeeProfile(supabase, authUser);
+      if (!employee) return json(404, { success: false, error: 'Employee profile not found' });
+
+      const body = readBody(event);
+      const level = String(body?.level || '').trim().toLowerCase();
+      const table = CATEGORY_TABLE_BY_LEVEL[level];
+      if (!table) {
+        return json(400, { success: false, error: 'Invalid category level' });
+      }
+
+      const id = String(body?.id || '').trim();
+      if (!id) {
+        return json(400, { success: false, error: 'Category id is required' });
+      }
+
+      const incomingPayload = body?.payload;
+      if (!incomingPayload || typeof incomingPayload !== 'object') {
+        return json(400, { success: false, error: 'payload object is required' });
+      }
+
+      const allowedKeysByLevel = {
+        head: ['name', 'slug', 'description', 'image_url', 'image', 'is_active'],
+        sub: ['name', 'slug', 'description', 'image_url', 'image', 'is_active'],
+        micro: ['name', 'slug', 'image_url', 'image', 'images', 'image_urls', 'is_active'],
+      };
+      const allowed = new Set(allowedKeysByLevel[level] || []);
+      const payload = {};
+      Object.keys(incomingPayload).forEach((key) => {
+        if (allowed.has(key)) payload[key] = incomingPayload[key];
+      });
+
+      if (!Object.keys(payload).length) {
+        return json(400, { success: false, error: 'No allowed fields provided in payload' });
+      }
+
+      const { data, error } = await supabase
+        .from(table)
+        .update(payload)
+        .eq('id', id)
+        .select('id')
+        .maybeSingle();
+
+      if (error) {
+        return json(500, { success: false, error: error.message || 'Failed to update category' });
+      }
+      if (!data?.id) {
+        return json(404, { success: false, error: 'Category not found or not updated' });
+      }
+
+      return json(200, { success: true, id: data.id });
     }
 
     // All /sales/* routes require employee + role access.

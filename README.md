@@ -149,6 +149,10 @@ Details: `docs/missing-migrations.md`
 - `npm run dev:all` - run both
 - `npm run build` - generate sitemaps + build
 
+## Netlify Deployment
+- Production checklist: `docs/netlify-production.md`
+- Env template for Netlify variables: `.env.netlify.example`
+
 ## Notes
 - Subdomain-aware routing is supported (vendor., buyer., dir., admin.).
 - Maintenance mode + public notice gates are driven by `system_config`.

@@ -10,6 +10,20 @@ const includesAny = (value, needles = []) => needles.some((needle) => value.incl
 
 const compactSpaces = (value) => value.replace(/\s{2,}/g, ' ');
 
+const normalizeHintFragment = (value) =>
+  toStringValue(value)
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .toLowerCase();
+
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const hasCodeToken = (value, token) => {
+  if (!value || !token) return false;
+  const pattern = new RegExp(`(?:^|[^a-z0-9])${escapeRegExp(token)}(?:[^a-z0-9]|$)`);
+  return pattern.test(value);
+};
+
 export const detectInputKind = ({
   type,
   name,
@@ -22,14 +36,14 @@ export const detectInputKind = ({
   labelText,
 } = {}) => {
   const normalizedType = toLower(type);
-  const normalizedName = toLower(name || id);
+  const normalizedName = normalizeHintFragment(name || id);
   const hintText = [
     normalizedName,
-    toLower(autoComplete),
-    toLower(placeholder),
-    toLower(ariaLabel),
-    toLower(title),
-    toLower(labelText),
+    normalizeHintFragment(autoComplete),
+    normalizeHintFragment(placeholder),
+    normalizeHintFragment(ariaLabel),
+    normalizeHintFragment(title),
+    normalizeHintFragment(labelText),
   ]
     .filter(Boolean)
     .join(' ');
@@ -82,13 +96,13 @@ export const detectInputKind = ({
     return 'phone';
   }
 
-  if (includesAny(hintText, ['gst'])) return 'gst';
-  if (includesAny(hintText, ['pan'])) return 'pan';
-  if (includesAny(hintText, ['aadhar', 'aadhaar'])) return 'aadhaar';
-  if (includesAny(hintText, ['cin'])) return 'cin';
-  if (includesAny(hintText, ['llpin'])) return 'llpin';
-  if (includesAny(hintText, ['iec'])) return 'iec';
-  if (includesAny(hintText, ['tan'])) return 'tan';
+  if (hasCodeToken(hintText, 'gst')) return 'gst';
+  if (hasCodeToken(hintText, 'pan')) return 'pan';
+  if (hasCodeToken(hintText, 'aadhaar') || hasCodeToken(hintText, 'aadhar')) return 'aadhaar';
+  if (hasCodeToken(hintText, 'cin')) return 'cin';
+  if (hasCodeToken(hintText, 'llpin')) return 'llpin';
+  if (hasCodeToken(hintText, 'iec')) return 'iec';
+  if (hasCodeToken(hintText, 'tan')) return 'tan';
 
   if (normalizedType === 'url' || includesAny(hintText, ['website', 'url', 'link'])) {
     return 'url';

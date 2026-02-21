@@ -3034,33 +3034,21 @@ export const vendorApi = {
   support: {
     getTickets: async (filters = {}) => {
       const vendorId = await getVendorId();
-      let query = supabase
-        .from('support_tickets')
-        .select('*')
-        .eq('vendor_id', vendorId);
-
-      if (filters.status) query = query.eq('status', filters.status);
-      if (filters.priority) query = query.eq('priority', filters.priority);
-      if (filters.category) query = query.eq('category', filters.category);
-
-      const { data, error } = await query.order('created_at', { ascending: false });
-      if (error) throw error;
-      return data || [];
+      const params = new URLSearchParams();
+      if (filters.status) params.set('status', filters.status);
+      if (filters.priority) params.set('priority', filters.priority);
+      if (filters.category) params.set('category', filters.category);
+      const query = params.toString();
+      const response = await fetchVendorJson(
+        `/api/support/vendor/${vendorId}${query ? `?${query}` : ''}`
+      );
+      return response?.tickets || [];
     },
 
     getTicketsByStatus: async (status) => {
-      const vendorId = await getVendorId();
       const validStatuses = ['OPEN', 'CLOSED', 'IN_PROGRESS'];
       if (!validStatuses.includes(status)) throw new Error(`Invalid status: ${status}`);
-
-      const { data, error } = await supabase
-        .from('support_tickets')
-        .select('*')
-        .eq('vendor_id', vendorId)
-        .eq('status', status)
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      return data || [];
+      return vendorApi.support.getTickets({ status });
     },
 
     getOpenTickets: async () => {
@@ -3073,35 +3061,27 @@ export const vendorApi = {
 
     createTicket: async (ticketData) => {
       const vendorId = await getVendorId();
+      const payload = {
+        vendor_id: vendorId,
+        subject: String(ticketData?.subject || '').trim(),
+        description: String(ticketData?.description || '').trim(),
+        category: String(ticketData?.category || 'General').trim() || 'General',
+        priority: String(ticketData?.priority || 'MEDIUM').toUpperCase(),
+        status: 'OPEN',
+        attachments: Array.isArray(ticketData?.attachments) ? ticketData.attachments : [],
+      };
 
-      const ticketDisplayId = `TKT-${Date.now()}`;
+      const response = await fetchVendorJson('/api/support/tickets', {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      });
 
-      const { data, error } = await supabase
-        .from('support_tickets')
-        .insert([{
-          vendor_id: vendorId,
-          subject: ticketData.subject,
-          description: ticketData.description,
-          category: ticketData.category || 'General Inquiry',
-          priority: ticketData.priority || 'Medium',
-          status: 'OPEN',
-          ticket_display_id: ticketDisplayId,
-          created_at: new Date().toISOString()
-        }])
-        .select()
-        .single();
-      if (error) throw error;
-      return data;
+      return response?.ticket || null;
     },
 
     getTicket: async (id) => {
-      const { data, error } = await supabase
-        .from('support_tickets')
-        .select('*')
-        .eq('id', id)
-        .single();
-      if (error) throw error;
-      return data;
+      const response = await fetchVendorJson(`/api/support/tickets/${id}`);
+      return response?.ticket || null;
     },
 
     deleteTicket: async (id) => {
@@ -3117,58 +3097,40 @@ export const vendorApi = {
     },
 
     getTicketDetail: async (id) => {
-      const { data: ticket, error: ticketError } = await supabase
-        .from('support_tickets')
-        .select('*')
-        .eq('id', id)
-        .single();
-      if (ticketError) throw ticketError;
+      const [ticketResponse, messagesResponse] = await Promise.all([
+        fetchVendorJson(`/api/support/tickets/${id}`),
+        fetchVendorJson(`/api/support/tickets/${id}/messages`),
+      ]);
 
-      const { data: messages, error: messagesError } = await supabase
-        .from('ticket_messages')
-        .select('*')
-        .eq('ticket_id', id)
-        .order('created_at', { ascending: true });
-      if (messagesError) throw messagesError;
+      const ticket = ticketResponse?.ticket || null;
+      const messages = messagesResponse?.messages || [];
+      if (!ticket) throw new Error('Ticket not found');
 
-      return { ...ticket, messages: messages || [] };
+      return { ...ticket, messages };
     },
 
     updateTicketStatus: async (id, status) => {
-      const validStatuses = ['OPEN', 'CLOSED', 'IN_PROGRESS'];
-      if (!validStatuses.includes(status)) throw new Error(`Invalid status: ${status}`);
+      const normalized = String(status || '').toUpperCase();
+      const validStatuses = ['OPEN', 'CLOSED', 'IN_PROGRESS', 'RESOLVED', 'CANCELLED'];
+      if (!validStatuses.includes(normalized)) throw new Error(`Invalid status: ${status}`);
 
-      const updateData = {
-        status,
-        updated_at: new Date().toISOString()
-      };
-
-      if (status === 'CLOSED') {
-        updateData.resolved_at = new Date().toISOString();
-      }
-
-      const { data, error } = await supabase
-        .from('support_tickets')
-        .update(updateData)
-        .eq('id', id)
-        .select()
-        .single();
-      if (error) throw error;
-      return data;
+      const response = await fetchVendorJson(`/api/support/tickets/${id}/status`, {
+        method: 'PUT',
+        body: JSON.stringify({ status: normalized }),
+      });
+      return response?.ticket || null;
     },
 
     updateTicketPriority: async (id, priority) => {
-      const validPriorities = ['Low', 'Medium', 'High', 'Critical'];
-      if (!validPriorities.includes(priority)) throw new Error(`Invalid priority: ${priority}`);
+      const normalized = String(priority || '').toUpperCase();
+      const validPriorities = ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL', 'URGENT'];
+      if (!validPriorities.includes(normalized)) throw new Error(`Invalid priority: ${priority}`);
 
-      const { data, error } = await supabase
-        .from('support_tickets')
-        .update({ priority, updated_at: new Date().toISOString() })
-        .eq('id', id)
-        .select()
-        .single();
-      if (error) throw error;
-      return data;
+      const response = await fetchVendorJson(`/api/support/tickets/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ priority: normalized }),
+      });
+      return response?.ticket || null;
     },
 
     closeTicket: async (id) => {
@@ -3182,38 +3144,20 @@ export const vendorApi = {
     addMessage: async (ticketId, message) => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
-
-      // Update ticket's last_reply_at
-      const { error: updateErr } = await supabase
-        .from('support_tickets')
-        .update({ last_reply_at: new Date().toISOString() })
-        .eq('id', ticketId);
-      if (updateErr) throw updateErr;
-
-      const { data, error } = await supabase
-        .from('ticket_messages')
-        .insert([{
-          ticket_id: ticketId,
-          sender_id: user.id,
+      const response = await fetchVendorJson(`/api/support/tickets/${ticketId}/messages`, {
+        method: 'POST',
+        body: JSON.stringify({
+          message: String(message || '').trim(),
           sender_type: 'VENDOR',
-          message: message,
-          created_at: new Date().toISOString()
-        }])
-        .select()
-        .single();
-
-      if (error) throw error;
-      return data;
+          sender_id: user.id,
+        }),
+      });
+      return response?.message || null;
     },
 
     getMessages: async (ticketId) => {
-      const { data, error } = await supabase
-        .from('ticket_messages')
-        .select('*')
-        .eq('ticket_id', ticketId)
-        .order('created_at', { ascending: true });
-      if (error) throw error;
-      return data || [];
+      const response = await fetchVendorJson(`/api/support/tickets/${ticketId}/messages`);
+      return response?.messages || [];
     },
 
     deleteMessage: async (id) => {

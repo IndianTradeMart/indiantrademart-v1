@@ -75,7 +75,11 @@ const Support = () => {
       loadTickets();
       toast({ title: "Ticket Created" });
     } catch (error) {
-      toast({ title: "Error creating ticket", variant: "destructive" });
+      toast({
+        title: "Error creating ticket",
+        description: error?.message || "Please try again",
+        variant: "destructive"
+      });
     } finally {
       setCreating(false);
     }
